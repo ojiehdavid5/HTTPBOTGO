@@ -1,9 +1,69 @@
 package main
 
 import (
-	"fmt"
+    "log"
+    // "os"
+
+    tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func main(){
-	fmt.Println("Hello, World!")
+var numericKeyboard = tgbotapi.NewReplyKeyboard(
+    tgbotapi.NewKeyboardButtonRow(
+        tgbotapi.NewKeyboardButton("1"),
+        tgbotapi.NewKeyboardButton("2"),
+        tgbotapi.NewKeyboardButton("3"),
+    ),
+    tgbotapi.NewKeyboardButtonRow( 
+        tgbotapi.NewKeyboardButton("4"),
+        tgbotapi.NewKeyboardButton("5"),
+        tgbotapi.NewKeyboardButton("6"),
+    ),
+)
+
+type MessageConfig struct {
+    ChatID    int64
+    Text      string
+}
+
+
+func main() {
+    bot, err := tgbotapi.NewBotAPI("7400994820:AAF3nDB3wwYQP_Cu3v6QeF2uWfDUyvG7A80")
+    if err != nil {
+        log.Panic(err)
+    }
+
+    bot.Debug = true
+    log.Printf("Authorized on account %s", bot.Self.UserName)
+
+    u := tgbotapi.NewUpdate(0)
+    u.Timeout = 60
+
+    updates := bot.GetUpdatesChan(u)
+
+    for update := range updates {
+        if update.Message == nil {
+            continue
+        }
+
+
+		messenger := MessageConfig{
+			ChatID: update.Message.Chat.ID,
+			Text:   "chuks is king",
+		}
+        msg := tgbotapi.NewMessage(update.Message.Chat.ID, messenger.Text)
+
+        switch update.Message.Text {
+        case "open":
+            msg.ReplyMarkup = numericKeyboard
+        case "close":
+            msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+        }
+
+        if _, err := bot.Send(msg); err != nil {
+            log.Panic(err)
+        }
+
+        // Update offset to avoid processing the same update again
+        u.Offset = update.UpdateID + 1
+    }
 }
