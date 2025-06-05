@@ -1,69 +1,145 @@
 package main
 
 import (
-    "log"
-    // "os"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
 
-    tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var numericKeyboard = tgbotapi.NewReplyKeyboard(
-    tgbotapi.NewKeyboardButtonRow(
-        tgbotapi.NewKeyboardButton("1"),
-        tgbotapi.NewKeyboardButton("2"),
-        tgbotapi.NewKeyboardButton("3"),
-    ),
-    tgbotapi.NewKeyboardButtonRow( 
-        tgbotapi.NewKeyboardButton("4"),
-        tgbotapi.NewKeyboardButton("5"),
-        tgbotapi.NewKeyboardButton("6"),
-    ),
-)
+func downloadFile(bot *tgbotapi.BotAPI, fileID, destPath string) error {
+	file, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
+	if err != nil {
+		return err
+	}
 
-type MessageConfig struct {
-    ChatID    int64
-    Text      string
+	fileURL := file.Link(bot.Token)
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
 }
 
+// OCR.Space API integration
+func extractTextWithOCRSpace(imgPath, apiKey string) (string, error) {
+	file, err := os.Open(imgPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filepath.Base(imgPath))
+	if err != nil {
+		return "", err
+	}
+	io.Copy(part, file)
+
+	writer.WriteField("language", "eng")
+	writer.WriteField("apikey", apiKey)
+	writer.Close()
+
+	req, err := http.NewRequest("POST", "https://api.ocr.space/parse/image", body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ParsedResults []struct {
+			ParsedText string `json:"ParsedText"`
+		} `json:"ParsedResults"`
+		IsErroredOnProcessing bool   `json:"IsErroredOnProcessing"`
+		ErrorMessage          string `json:"ErrorMessage"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if result.IsErroredOnProcessing {
+		return "", fmt.Errorf("OCR error: %s", result.ErrorMessage)
+	}
+
+	if len(result.ParsedResults) == 0 {
+		return "No text found", nil
+	}
+
+	return result.ParsedResults[0].ParsedText, nil
+}
 
 func main() {
-    bot, err := tgbotapi.NewBotAPI("7400994820:AAF3nDB3wwYQP_Cu3v6QeF2uWfDUyvG7A80")
-    if err != nil {
-        log.Panic(err)
-    }
+	bot, err := tgbotapi.NewBotAPI("7400994820:AAF3nDB3wwYQP_Cu3v6QeF2uWfDUyvG7A80")
+	if err != nil {
+		log.Panic(err)
+	}
 
-    bot.Debug = true
-    log.Printf("Authorized on account %s", bot.Self.UserName)
+	bot.Debug = true
+	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-    u := tgbotapi.NewUpdate(0)
-    u.Timeout = 60
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
 
-    updates := bot.GetUpdatesChan(u)
+	updates := bot.GetUpdatesChan(u)
+	ocrAPIKey := "K83169488088957" // Replace with your actual OCR.Space key
 
-    for update := range updates {
-        if update.Message == nil {
-            continue
-        }
-
-
-		messenger := MessageConfig{
-			ChatID: update.Message.Chat.ID,
-			Text:   "chuks is king",
+	for update := range updates {
+		if update.Message == nil {
+			continue
 		}
-        msg := tgbotapi.NewMessage(update.Message.Chat.ID, messenger.Text)
 
-        switch update.Message.Text {
-        case "open":
-            msg.ReplyMarkup = numericKeyboard
-        case "close":
-            msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-        }
+		if update.Message.Photo != nil {
+			fileID := update.Message.Photo[len(update.Message.Photo)-1].FileID
+			imgPath := "downloaded_image.jpg"
 
-        if _, err := bot.Send(msg); err != nil {
-            log.Panic(err)
-        }
+			// Download image
+			if err := downloadFile(bot, fileID, imgPath); err != nil {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Failed to download image."))
+				continue
+			}
 
-        // Update offset to avoid processing the same update again
-        u.Offset = update.UpdateID + 1
-    }
+			// Extract text via OCR.Space
+			text, err := extractTextWithOCRSpace(imgPath, ocrAPIKey)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Failed to extract text: "+err.Error()))
+				continue
+			}
+
+			// Send extracted text
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Extracted Text:\n"+text)
+			bot.Send(msg)
+
+			// Clean up
+			os.Remove(imgPath)
+			continue
+		}
+
+		// Default message
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Send a photo and I'll extract the text for you.")
+		bot.Send(msg)
+	}
 }
