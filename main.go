@@ -130,7 +130,7 @@ func main() {
 			}
 
 			// Send extracted text
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Extracted Text:\n"+text)
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Your payment to this account number will be made shortly:\n"+text)
 			bot.Send(msg)
 
 			// Clean up
