@@ -14,6 +14,14 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+
+var numericKeyboard = tgbotapi.NewReplyKeyboard(
+    tgbotapi.NewKeyboardButtonRow(
+        tgbotapi.NewKeyboardButton("1"),
+        tgbotapi.NewKeyboardButton("2"),
+        tgbotapi.NewKeyboardButton("3"),
+    ),
+)
 func downloadFile(bot *tgbotapi.BotAPI, fileID, destPath string) error {
 	file, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
 	if err != nil {
@@ -111,6 +119,20 @@ func main() {
 		if update.Message == nil {
 			continue
 		}
+        msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+		
+
+
+		switch update.Message.Command() {
+        case "/help":
+            msg.Text = "I understand /sayhi and /status."
+        case "/sayhi":
+            msg.Text = "Hi :)"
+        case "/status":
+            msg.Text = "I'm ok."
+        default:
+            msg.Text = "I don't know that command"
+        }
 
 		if update.Message.Photo != nil {
 			fileID := update.Message.Photo[len(update.Message.Photo)-1].FileID
@@ -130,7 +152,7 @@ func main() {
 			}
 
 			// Send extracted text
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Your payment to this account number will be made shortly:\n"+text)
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "\n"+text+ "enter amount to be paid")
 			bot.Send(msg)
 
 			// Clean up
@@ -139,7 +161,7 @@ func main() {
 		}
 
 		// Default message
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Send a photo and I'll extract the text for you.")
+		msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Send a picture of the account number to make payment ")
 		bot.Send(msg)
 	}
 }
